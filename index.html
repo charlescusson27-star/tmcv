@@ -1,0 +1,947 @@
+<!DOCTYPE html>
+<html lang="fr" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LE QG - Espace Collaboratif Lycée</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+</head>
+<body id="body-theme" class="bg-stone-950 text-amber-50 h-full flex flex-col font-sans selection:bg-amber-500 selection:text-white transition-all duration-500 bg-cover bg-center bg-fixed">
+
+    <div id="app" class="h-full flex flex-col flex-1 backdrop-blur-sm bg-black/60">
+        <div class="flex-1 flex items-center justify-center p-4 text-center">
+            <div class="space-y-3">
+                <div class="w-10 h-10 border-4 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+                <p class="text-amber-200 text-sm font-medium">Chargement de LE QG...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Canva / Créateur de Thème -->
+    <div id="theme-canvas-modal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+        <div class="w-full max-w-lg bg-stone-950 border border-amber-500/40 rounded-3xl p-6 shadow-2xl space-y-4">
+            <div class="flex justify-between items-center border-b border-amber-900/40 pb-3">
+                <h3 class="font-black text-base text-amber-400"><i class="fa-solid fa-paintbrush mr-2"></i>Thème Personnalisé (Canva / Image Web)</h3>
+                <button onclick="toggleModal('theme-canvas-modal', false)" class="text-amber-200/70 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button>
+            </div>
+            <div class="space-y-3 text-xs">
+                <div>
+                    <label class="block font-bold text-amber-200 mb-1">Nom du thème</label>
+                    <input type="text" id="canvas-theme-name" placeholder="Ex: Fond Canva Automne" class="w-full px-3 py-2 bg-stone-900 border border-amber-900/40 rounded-xl text-amber-100">
+                </div>
+                <div>
+                    <label class="block font-bold text-amber-200 mb-1">URL de l'image de fond</label>
+                    <input type="url" id="canvas-theme-bg" placeholder="https://images.unsplash.com/..." class="w-full px-3 py-2 bg-stone-900 border border-amber-900/40 rounded-xl text-amber-100">
+                </div>
+            </div>
+            <div class="flex justify-between items-center pt-3 border-t border-amber-900/40">
+                <button onclick="window.open('https://www.canva.com/fr_fr/', '_blank')" class="px-3 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-bold flex items-center gap-2">
+                    <i class="fa-solid fa-external-link"></i> Ouvrir Canva.com
+                </button>
+                <div class="flex gap-2">
+                    <button onclick="toggleModal('theme-canvas-modal', false)" class="px-4 py-2 bg-stone-900 text-amber-200 rounded-xl text-xs">Annuler</button>
+                    <button onclick="saveCanvasTheme()" class="px-5 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold">Enregistrer le Thème</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification Global -->
+    <div id="global-notification-toast" class="hidden fixed bottom-6 right-6 z-50 max-w-sm bg-stone-900 border-2 border-amber-500 p-4 rounded-2xl shadow-2xl flex items-start gap-3">
+        <div class="text-amber-400 text-2xl" id="toast-icon"><i class="fa-solid fa-bell"></i></div>
+        <div class="flex-1 space-y-1">
+            <h4 class="font-bold text-xs text-amber-300" id="toast-title">LE QG</h4>
+            <p class="text-xs text-amber-100" id="toast-msg"></p>
+            <div id="toast-action" class="pt-1"></div>
+        </div>
+        <button onclick="toggleModal('global-notification-toast', false)" class="text-amber-200/50"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+
+    <script>
+        const SB_URL = 'https://jbenyehthydjmahpoisd.supabase.co';
+        const SB_KEY = 'sb_publishable_m3b9h4bgzdTJrgFLIzSJXQ_Og-vBeOa';
+
+        let sb = null;
+        try { if (window.supabase) sb = window.supabase.createClient(SB_URL, SB_KEY); } catch(e){}
+
+        const DB = {
+            async get(k, fb) {
+                try {
+                    if (sb) {
+                        let { data } = await sb.from('tmcv_data').select('value').eq('key', k).maybeSingle();
+                        if (data?.value) return data.value;
+                    }
+                } catch(e){}
+                let item = localStorage.getItem('leqg_' + k);
+                return item ? JSON.parse(item) : fb;
+            },
+            async set(k, val) {
+                try { if (sb) await sb.from('tmcv_data').upsert({ key: k, value: val }); } catch(e){}
+                localStorage.setItem('leqg_' + k, JSON.stringify(val));
+            }
+        };
+
+        let state = {
+            tab: 'home',
+            sidebar: false,
+            chatMode: 'general',
+            targetUser: null,
+            adminSub: 'users',
+            activeQuizId: null
+        };
+
+        async function init() {
+            if (!await DB.get('users', null)) {
+                await DB.set('users', [
+                    { username: 'admin', password: 'admin20', role: 'admin', status: 'active', avatar: '🏰', mustChangePass: true, birthday: '2009-03-26' }
+                ]);
+            }
+            if (!await DB.get('messages', null)) DB.set('messages', [{ id: 1, type: 'general', sender: 'admin', text: 'Bienvenue sur LE QG !', time: 'Aujourd\'hui' }]);
+            if (!await DB.get('appreciations', null)) DB.set('appreciations', {});
+            if (!await DB.get('custom_pages', null)) DB.set('custom_pages', []);
+            if (!await DB.get('hidden_pages', null)) DB.set('hidden_pages', []);
+            if (!await DB.get('custom_themes', null)) DB.set('custom_themes', []);
+            if (!await DB.get('revision_sheets', null)) DB.set('revision_sheets', []);
+            if (!await DB.get('exam_subjects', null)) DB.set('exam_subjects', []);
+            if (!await DB.get('admin_calendar', null)) DB.set('admin_calendar', []);
+            if (!await DB.get('quizzes', null)) DB.set('quizzes', []);
+            if (!await DB.get('quiz_submissions', null)) DB.set('quiz_submissions', []);
+            if (!await DB.get('orientation_links', null)) DB.set('orientation_links', []);
+            if (!await DB.get('home_qr_url', null)) DB.set('home_qr_url', window.location.href);
+
+            applyTheme(await DB.get('theme', 'autumn'));
+
+            setInterval(showRefreshReminder, 600000);
+            setInterval(checkAlarms, 30000);
+            render();
+        }
+
+        function showRefreshReminder() {
+            let user = getCurrentUser();
+            if (!user) return;
+            document.getElementById('toast-title').textContent = "Mise à jour disponible 🔄";
+            document.getElementById('toast-msg').textContent = "Pense à actualiser ta page pour voir les dernières nouveautés et messages !";
+            document.getElementById('toast-action').innerHTML = `<button onclick="location.reload()" class="px-3 py-1 bg-amber-500 text-black font-bold rounded-lg text-xs">Actualiser maintenant</button>`;
+            document.getElementById('global-notification-toast').classList.remove('hidden');
+        }
+
+        async function checkAlarms() {
+            let user = getCurrentUser();
+            if (!user) return;
+            let now = new Date();
+            if (now.getHours() === 9 && now.getMinutes() === 0 && localStorage.getItem('leqg_cantine') !== now.toDateString()) {
+                showToast("Rappel Cantine 🍽️", "Pense à réserver ta cantine à la borne du hall !");
+                localStorage.setItem('leqg_cantine', now.toDateString());
+            }
+
+            let adminEvents = await DB.get('admin_calendar', []);
+            let personalEvents = user.personalCalendar || [];
+            let allEvs = [...adminEvents, ...personalEvents];
+            let todayStr = now.toISOString().split('T')[0];
+            allEvs.forEach(ev => {
+                if(ev.date === todayStr && localStorage.getItem('notif_'+ev.id) !== todayStr) {
+                    showToast("Rappel Événement 📅", ev.title);
+                    localStorage.setItem('notif_'+ev.id, todayStr);
+                }
+            });
+        }
+
+        function getCurrentUser() {
+            return JSON.parse(localStorage.getItem('leqg_current_user') || 'null');
+        }
+
+        function showToast(title, msg) {
+            document.getElementById('toast-title').textContent = title;
+            document.getElementById('toast-msg').textContent = msg;
+            document.getElementById('toast-action').innerHTML = '';
+            document.getElementById('global-notification-toast').classList.remove('hidden');
+            setTimeout(() => document.getElementById('global-notification-toast').classList.add('hidden'), 7000);
+        }
+
+        function toggleModal(id, show) {
+            let el = document.getElementById(id);
+            if(el) el.classList.toggle('hidden', !show);
+        }
+
+        async function applyTheme(theme) {
+            let body = document.getElementById('body-theme');
+            let custom = (await DB.get('custom_themes', [])).find(t => t.id === theme);
+            if (custom) {
+                body.style.backgroundImage = `url('${custom.bgUrl}')`;
+                window.currentBtnClass = "bg-amber-600 hover:bg-amber-500 text-white rounded-2xl font-bold shadow-lg transition-all p-2.5";
+                window.currentCardClass = "bg-stone-950/90 border border-amber-500/40 shadow-2xl rounded-3xl backdrop-blur-md";
+                return;
+            }
+            const themes = {
+                christmas: { bg: 'photo-1543589077-47d81606c1bf', btn: 'bg-red-700 text-amber-100', card: 'bg-sky-950/90' },
+                summer: { bg: 'photo-1507525428034-b723cf961d3e', btn: 'bg-amber-500 text-blue-950', card: 'bg-blue-950/85' },
+                spring: { bg: 'photo-1522383225653-ed111181a951', btn: 'bg-emerald-600 text-white', card: 'bg-emerald-950/85' },
+                cyberpunk: { bg: 'photo-1508739773434-c26b3d09e071', btn: 'bg-pink-600 text-white', card: 'bg-purple-950/90' },
+                royal: { bg: 'photo-1618005182384-a83a8bd57fbe', btn: 'bg-yellow-600 text-black', card: 'bg-stone-950/90' },
+                autumn: { bg: 'photo-1507783592120-a61f55877f6c', btn: 'bg-orange-600 text-amber-100', card: 'bg-stone-950/90' }
+            };
+            let t = themes[theme] || themes.autumn;
+            body.style.backgroundImage = `url('https://images.unsplash.com/${t.bg}?q=80&w=1920&auto=format&fit=crop')`;
+            window.currentBtnClass = t.btn + " rounded-2xl font-bold shadow-lg transition-all p-2.5";
+            window.currentCardClass = t.card + " border border-amber-900/40 shadow-2xl rounded-3xl backdrop-blur-md";
+        }
+
+        async function render() {
+            let app = document.getElementById('app'), user = getCurrentUser();
+            if (!user) return app.innerHTML = renderLogin();
+            if (user.status === 'masked') return app.innerHTML = `<div class="flex-1 flex flex-col items-center justify-center p-6 text-center"><h1 class="text-2xl font-bold text-red-400">Compte Désactivé</h1><p class="text-xs text-amber-200/60 mt-2">Ton accès a été temporairement suspendu par un administrateur.</p><button onclick="logout()" class="mt-4 px-5 py-2 bg-amber-900 text-white rounded-xl text-xs">Déconnexion</button></div>`;
+            if (user.mustChangePass) return app.innerHTML = renderSetup();
+            app.innerHTML = await renderDashboard(user);
+        }
+
+        function renderLogin() {
+            return `<div class="flex-1 flex items-center justify-center p-4"><div class="w-full max-w-md bg-stone-950/90 border border-amber-800/40 rounded-3xl p-8 shadow-2xl space-y-6 text-center">
+                <div class="p-4 bg-amber-500/10 text-amber-400 rounded-2xl text-4xl inline-block"><i class="fa-solid fa-chess-rook"></i></div>
+                <h1 class="text-3xl font-black text-white">LE QG</h1>
+                <form onsubmit="handleLogin(event)" class="space-y-4 text-left">
+                    <input type="text" id="l-user" required placeholder="Identifiant" class="w-full px-4 py-3 bg-stone-900 border border-amber-900/50 rounded-2xl text-sm text-amber-100">
+                    <input type="password" id="l-pass" required placeholder="Mot de passe" class="w-full px-4 py-3 bg-stone-900 border border-amber-900/50 rounded-2xl text-sm text-amber-100">
+                    <button type="submit" class="w-full py-3.5 ${window.currentBtnClass} text-sm">Se connecter</button>
+                </form>
+            </div></div>`;
+        }
+
+        function renderSetup() {
+            return `<div class="flex-1 flex items-center justify-center p-4"><div class="w-full max-w-md bg-stone-950/90 border border-amber-800/40 rounded-3xl p-8 shadow-2xl space-y-6">
+                <h1 class="text-xl font-bold text-amber-400">Première Connexion</h1>
+                <p class="text-xs text-amber-200/70">Merci de définir ton mot de passe personnel ainsi que ta date d'anniversaire.</p>
+                <form onsubmit="saveSetup(event)" class="space-y-4">
+                    <div><label class="block text-xs text-amber-200 mb-1">Nouveau mot de passe</label><input type="password" id="s-pass" required class="w-full px-4 py-3 bg-stone-900 border border-amber-900/50 rounded-2xl text-sm text-white"></div>
+                    <div><label class="block text-xs text-amber-200 mb-1">Date d'anniversaire</label><input type="date" id="s-bday" required class="w-full px-4 py-3 bg-stone-900 border border-amber-900/50 rounded-2xl text-sm text-white"></div>
+                    <button type="submit" class="w-full py-3.5 ${window.currentBtnClass} text-sm">Valider & Enregistrer</button>
+                </form>
+            </div></div>`;
+        }
+
+        async function renderDashboard(user) {
+            let customPages = await DB.get('custom_pages', []);
+            let hiddenPages = await DB.get('hidden_pages', []);
+            let navs = customPages.filter(p => !hiddenPages.includes('page_' + p.id)).map(p => sbBtn('page_' + p.id, p.title, p.icon || 'file-lines')).join('');
+
+            return `
+                <header class="bg-stone-950/80 border-b border-amber-900/40 sticky top-0 z-40 px-4 py-3 flex justify-between items-center backdrop-blur-md">
+                    <div class="flex items-center gap-3">
+                        <button onclick="state.sidebar=!state.sidebar;render()" class="p-2 bg-stone-900 text-amber-100 rounded-xl"><i class="fa-solid fa-bars"></i></button>
+                        <div class="flex items-center gap-2 font-black text-amber-400">🏰 LE QG <span class="text-xs text-amber-200/70 font-normal">(${user.username})</span></div>
+                    </div>
+                    <button onclick="logout()" class="px-3 py-1.5 bg-stone-900 text-amber-200 text-xs rounded-xl border border-amber-900/40">Déconnexion</button>
+                </header>
+                <div class="flex-1 flex overflow-hidden relative">
+                    <aside class="fixed inset-y-0 left-0 z-30 w-72 bg-stone-950/95 border-r border-amber-900/40 transform ${state.sidebar ? 'translate-x-0' : '-translate-x-full'} transition-transform flex flex-col p-5 pt-20 shadow-2xl">
+                        <nav class="space-y-1.5 flex-1 overflow-y-auto text-xs">
+                            ${!hiddenPages.includes('home') ? sbBtn('home', 'Accueil & QR Code', 'house') : ''}
+                            ${!hiddenPages.includes('appreciations') ? sbBtn('appreciations', 'Mes Appréciations', 'award') : ''}
+                            ${!hiddenPages.includes('avatar') ? sbBtn('avatar', 'Mon Avatar', 'user-pen') : ''}
+                            ${!hiddenPages.includes('chat') ? sbBtn('chat', 'Messagerie', 'comments') : ''}
+                            ${!hiddenPages.includes('calendar') ? sbBtn('calendar', 'Calendrier & Agenda', 'calendar-days') : ''}
+                            ${!hiddenPages.includes('quizzes') ? sbBtn('quizzes', 'Quiz & Progrès', 'brain') : ''}
+                            ${!hiddenPages.includes('orientation') ? sbBtn('orientation', 'Orientation', 'compass') : ''}
+                            ${!hiddenPages.includes('revisions') ? sbBtn('revisions', 'Fiches de Révision', 'book-open') : ''}
+                            ${!hiddenPages.includes('exams') ? sbBtn('exams', 'Sujets Bac', 'graduation-cap') : ''}
+                            ${!hiddenPages.includes('notes') ? sbBtn('notes', 'Bloc-Notes', 'note-sticky') : ''}
+                            ${navs}
+                            ${user.role === 'admin' ? sbBtn('gemini', 'Gemini AI', 'sparkles', 'text-sky-400 bg-sky-500/10') : ''}
+                            ${user.role === 'admin' ? sbBtn('admin', 'Administration', 'user-gear', 'text-amber-400 bg-amber-500/10') : ''}
+                        </nav>
+                    </aside>
+                    <main class="flex-1 overflow-y-auto p-4 md:p-8">${await renderContent(user)}</main>
+                </div>`;
+        }
+
+        function sbBtn(id, label, icon, extra = '') {
+            let active = state.tab === id;
+            return `<button onclick="state.tab='${id}';state.sidebar=false;render()" class="w-full text-left px-4 py-3 rounded-2xl flex items-center gap-3 border transition-all ${active ? window.currentBtnClass : 'text-amber-200/80 bg-stone-900/50 border-transparent hover:bg-stone-900'} ${extra}"><i class="fa-solid fa-${icon}"></i> ${label}</button>`;
+        }
+
+        async function renderContent(user) {
+            if (state.tab.startsWith('page_')) {
+                let cp = (await DB.get('custom_pages', [])).find(x => x.id == state.tab.replace('page_', ''));
+                return cp ? `<div class="max-w-4xl mx-auto ${window.currentCardClass} p-8 space-y-4"><h2 class="text-2xl font-black text-amber-400">${cp.title}</h2><div class="text-amber-100">${cp.content}</div></div>` : '';
+            }
+            if (state.tab === 'home') return renderHome();
+            if (state.tab === 'appreciations') return renderUserAppreciations(user);
+            if (state.tab === 'chat') return renderChat(user);
+            if (state.tab === 'calendar') return renderCalendar(user);
+            if (state.tab === 'quizzes') return renderQuizzes(user);
+            if (state.tab === 'orientation') return renderOrientation(user);
+            if (state.tab === 'revisions') return renderDocPage('Fiches de Révision', await DB.get('revision_sheets', []), user);
+            if (state.tab === 'exams') return renderDocPage('Sujets Bac & Exercices', await DB.get('exam_subjects', []), user);
+            if (state.tab === 'avatar') return `<div class="max-w-md mx-auto ${window.currentCardClass} p-8 text-center space-y-6"><div class="text-7xl">${user.avatar || '🏰'}</div><div class="grid grid-cols-5 gap-3">${['🏰','🎓','🚀','⭐','💻','🦊','⚡','📚','🎯','💡'].map(e=>`<button onclick="updateAvatar('${e}')" class="p-3 bg-stone-900 rounded-2xl text-2xl hover:scale-110 transition-transform">${e}</button>`).join('')}</div></div>`;
+            if (state.tab === 'notes') return `<div class="max-w-3xl mx-auto ${window.currentCardClass} p-6 h-[500px] flex flex-col"><h2 class="text-xl font-bold text-amber-400 mb-2">Bloc-Notes</h2><textarea oninput="DB.set('note_'+ '${user.username}', this.value)" class="flex-1 w-full bg-stone-900 border border-amber-900/40 p-4 rounded-2xl text-sm text-amber-100" placeholder="Écris tes notes personnelles ici...">${localStorage.getItem('leqg_note_'+user.username)||''}</textarea></div>`;
+            if (state.tab === 'gemini' && user.role === 'admin') return renderGeminiTab();
+            if (state.tab === 'admin' && user.role === 'admin') return renderAdmin(user);
+            return '';
+        }
+
+        async function renderHome() {
+            let qrUrl = await DB.get('home_qr_url', window.location.href);
+            return `
+                <div class="max-w-3xl mx-auto space-y-6 text-center">
+                    <div class="${window.currentCardClass} p-8 space-y-4">
+                        <h2 class="text-3xl font-black text-white">Bienvenue sur LE QG !</h2>
+                        <p class="text-amber-200/80 text-sm">Ton espace collaboratif de lycée.</p>
+                    </div>
+
+                    <div class="${window.currentCardClass} p-8 space-y-4">
+                        <h3 class="text-xl font-black text-amber-400"><i class="fa-solid fa-mobile-screen-button mr-2"></i>Accès & Installation Smartphone</h3>
+                        <p class="text-xs text-amber-200/70">Scanne ce QR Code officiel pour ouvrir l'application directement sur ton smartphone :</p>
+                        <div id="home-qrcode-box" class="bg-white p-4 inline-block rounded-2xl shadow-xl border-4 border-amber-500"></div>
+                        <p class="text-[10px] text-amber-200/40 truncate">Lien : ${qrUrl}</p>
+                    </div>
+                </div>
+                <script>
+                    setTimeout(() => {
+                        let box = document.getElementById('home-qrcode-box');
+                        if (box && box.innerHTML === '') {
+                            new QRCode(box, { text: "${qrUrl}", width: 170, height: 170 });
+                        }
+                    }, 100);
+                <\/script>`;
+        }
+
+        async function renderUserAppreciations(user) {
+            let allAppreciations = await DB.get('appreciations', {});
+            let myApp = allAppreciations[user.username] || { t1: '', t2: '', t3: '', published: false };
+
+            if (!myApp.published && user.role !== 'admin') {
+                return `
+                    <div class="max-w-2xl mx-auto ${window.currentCardClass} p-8 text-center space-y-4">
+                        <i class="fa-solid fa-lock text-4xl text-amber-400"></i>
+                        <h2 class="text-2xl font-black text-white">Appréciations Trimestrielles</h2>
+                        <p class="text-xs text-amber-200/70">Les appréciations trimestrielles n'ont pas encore été publiées par l'administration.</p>
+                    </div>`;
+            }
+
+            return `
+                <div class="max-w-3xl mx-auto space-y-6">
+                    <div class="${window.currentCardClass} p-6 space-y-2">
+                        <h2 class="text-2xl font-black text-amber-400"><i class="fa-solid fa-award mr-2"></i>Mes Appréciations Trimestrielles</h2>
+                        <p class="text-xs text-amber-200/70">Consulte tes appréciations générales trimestrielles renseignées par l'administration.</p>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div class="${window.currentCardClass} p-5 space-y-2">
+                            <h3 class="font-bold text-amber-300 text-sm border-b border-amber-900/40 pb-2">Trimestre 1</h3>
+                            <p class="text-xs text-amber-100 italic">${myApp.t1 || 'Aucune appréciation renseignée.'}</p>
+                        </div>
+                        <div class="${window.currentCardClass} p-5 space-y-2">
+                            <h3 class="font-bold text-amber-300 text-sm border-b border-amber-900/40 pb-2">Trimestre 2</h3>
+                            <p class="text-xs text-amber-100 italic">${myApp.t2 || 'Aucune appréciation renseignée.'}</p>
+                        </div>
+                        <div class="${window.currentCardClass} p-5 space-y-2">
+                            <h3 class="font-bold text-amber-300 text-sm border-b border-amber-900/40 pb-2">Trimestre 3</h3>
+                            <p class="text-xs text-amber-100 italic">${myApp.t3 || 'Aucune appréciation renseignée.'}</p>
+                        </div>
+                    </div>
+                </div>`;
+        }
+
+        async function renderChat(user) {
+            let allUsers = await DB.get('users', []);
+            let messages = await DB.get('messages', []);
+            let activeMsgs = state.chatMode === 'general' ? messages.filter(m => m.type === 'general') : messages.filter(m => m.type === 'private' && ((m.sender === user.username && m.recipient === state.targetUser) || (m.sender === state.targetUser && m.recipient === user.username)));
+
+            return `
+                <div class="max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-4 h-[600px]">
+                    <div class="${window.currentCardClass} p-4 shadow-xl flex flex-col space-y-3">
+                        <h3 class="font-bold text-xs uppercase tracking-wider text-amber-200/70">Messagerie</h3>
+                        <button onclick="state.chatMode='general';state.targetUser=null;render()" class="w-full text-left p-3.5 rounded-2xl text-xs font-bold transition-all flex items-center gap-3 ${state.chatMode === 'general' ? window.currentBtnClass : 'bg-stone-900 text-amber-200/80'}">
+                            <i class="fa-solid fa-bullhorn text-sm"></i> Canal Général
+                        </button>
+                        <div class="border-t border-amber-900/30 pt-3 flex-1 overflow-y-auto space-y-2">
+                            <p class="text-[10px] uppercase font-bold text-amber-200/50 px-1">Membres (MP)</p>
+                            ${allUsers.filter(u => u.username !== user.username && u.status !== 'masked').map(u => `
+                                <button onclick="state.chatMode='private';state.targetUser='${u.username}';render()" class="w-full text-left p-3 rounded-2xl text-xs transition-all flex items-center gap-3 ${state.chatMode === 'private' && state.targetUser === u.username ? window.currentBtnClass : 'bg-stone-900 text-amber-200/80'}">
+                                    <span class="text-xl">${u.avatar || '🏰'}</span>
+                                    <div class="truncate"><p class="font-bold truncate">${u.username}</p></div>
+                                </button>
+                            `).join('')}
+                        </div>
+                    </div>
+                    <div class="md:col-span-3 ${window.currentCardClass} p-6 shadow-xl flex flex-col justify-between">
+                        <div class="border-b border-amber-900/30 pb-3 flex justify-between items-center">
+                            <h2 class="font-bold text-sm text-amber-400">${state.chatMode === 'general' ? '💬 Canal Général' : '🔒 MP avec ' + state.targetUser}</h2>
+                        </div>
+                        <div class="flex-1 bg-stone-900 border border-amber-900/30 rounded-2xl p-4 my-3 overflow-y-auto space-y-3">
+                            ${activeMsgs.length > 0 ? activeMsgs.map(m => `
+                                <div class="p-3.5 bg-stone-950 border border-amber-900/30 rounded-2xl text-xs space-y-1.5">
+                                    <div class="flex justify-between text-[10px] text-amber-200/50"><span class="font-bold text-amber-400">${m.sender}</span><span>${m.time}</span></div>
+                                    <p class="text-amber-100 text-sm">${m.text}</p>
+                                </div>
+                            `).join('') : '<div class="text-center py-24 text-amber-200/40 text-xs italic">Aucun message pour le moment.</div>'}
+                        </div>
+                        <form onsubmit="sendMessage(event)" class="flex gap-2">
+                            <input type="text" id="chat-input" placeholder="Écrire un message..." required class="flex-1 px-4 py-3 bg-stone-900 border border-amber-900/40 rounded-2xl text-xs text-amber-100">
+                            <button type="submit" class="${window.currentBtnClass}">Envoyer</button>
+                        </form>
+                    </div>
+                </div>`;
+        }
+
+        async function sendMessage(e) {
+            e.preventDefault();
+            let input = document.getElementById('chat-input'), text = input.value.trim();
+            if(!text) return;
+            let user = getCurrentUser();
+            let messages = await DB.get('messages', []);
+            messages.push({ id: Date.now(), type: state.chatMode, sender: user.username, recipient: state.targetUser, text, time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) });
+            await DB.set('messages', messages);
+            input.value = '';
+            render();
+        }
+
+        async function renderCalendar(user) {
+            let adminEvents = await DB.get('admin_calendar', []);
+            let personalEvents = user.personalCalendar || [];
+            return `
+                <div class="max-w-4xl mx-auto space-y-6">
+                    <div class="${window.currentCardClass} p-6 space-y-4">
+                        <h2 class="text-2xl font-black text-amber-400"><i class="fa-solid fa-calendar-days mr-2"></i>Agenda & Calendrier</h2>
+                        <p class="text-xs text-amber-200/70">Consulte les événements du lycée et ajoute tes propres rappels personnels.</p>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div class="${window.currentCardClass} p-6 space-y-3">
+                            <h3 class="font-bold text-amber-300 text-sm uppercase">📌 Événements Généraux</h3>
+                            <div class="space-y-2 max-h-64 overflow-y-auto text-xs">
+                                ${adminEvents.length > 0 ? adminEvents.map(ev => `
+                                    <div class="p-3 bg-stone-900 rounded-xl border border-amber-900/30 flex justify-between">
+                                        <div><p class="font-bold text-amber-100">${ev.title}</p><p class="text-[10px] text-amber-200/50">${ev.date}</p></div>
+                                    </div>
+                                `).join('') : '<p class="text-xs text-amber-200/40 italic">Aucun événement général.</p>'}
+                            </div>
+                        </div>
+                        <div class="${window.currentCardClass} p-6 space-y-3">
+                            <h3 class="font-bold text-amber-300 text-sm uppercase">✏️ Mes Rappels Personnels</h3>
+                            <form onsubmit="addPersonalEvent(event)" class="space-y-2 pb-2">
+                                <input type="text" id="ev-title" placeholder="Titre de l'événement..." required class="w-full p-2.5 bg-stone-900 border border-amber-900/40 rounded-xl text-xs text-amber-100">
+                                <input type="date" id="ev-date" required class="w-full p-2.5 bg-stone-900 border border-amber-900/40 rounded-xl text-xs text-amber-100">
+                                <button type="submit" class="w-full py-2 ${window.currentBtnClass} text-xs">Ajouter au calendrier</button>
+                            </form>
+                            <div class="space-y-2 max-h-48 overflow-y-auto text-xs">
+                                ${personalEvents.map(ev => `
+                                    <div class="p-3 bg-stone-900 rounded-xl border border-amber-900/30 flex justify-between">
+                                        <div><p class="font-bold text-amber-100">${ev.title}</p><p class="text-[10px] text-amber-200/50">${ev.date}</p></div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+        }
+
+        async function addPersonalEvent(e) {
+            e.preventDefault();
+            let title = document.getElementById('ev-title').value;
+            let date = document.getElementById('ev-date').value;
+            let user = getCurrentUser();
+            let users = await DB.get('users', []);
+            let idx = users.findIndex(u => u.username === user.username);
+            if(idx !== -1) {
+                if(!users[idx].personalCalendar) users[idx].personalCalendar = [];
+                users[idx].personalCalendar.push({ id: Date.now(), title, date });
+                await DB.set('users', users);
+                localStorage.setItem('leqg_current_user', JSON.stringify(users[idx]));
+                render();
+            }
+        }
+
+        async function renderQuizzes(user) {
+            let quizzes = await DB.get('quizzes', []);
+            let submissions = await DB.get('quiz_submissions', []);
+            let userSubmissions = submissions.filter(s => s.username === user.username);
+
+            if(state.activeQuizId) {
+                let quiz = quizzes.find(q => q.id == state.activeQuizId);
+                if(!quiz) return `<div class="text-center text-amber-200">Quiz introuvable. <button onclick="state.activeQuizId=null;render()" class="text-amber-400 underline">Retour</button></div>`;
+                return `
+                    <div class="max-w-3xl mx-auto ${window.currentCardClass} p-8 space-y-6">
+                        <div class="flex justify-between items-center border-b border-amber-900/40 pb-4">
+                            <h2 class="text-2xl font-black text-amber-400">${quiz.title}</h2>
+                            <button onclick="state.activeQuizId=null;render()" class="px-3 py-1 bg-stone-900 text-amber-200 rounded-xl text-xs">Quitter</button>
+                        </div>
+                        <form onsubmit="submitQuiz(event, ${quiz.id})" class="space-y-6">
+                            ${quiz.questions.map((q, idx) => `
+                                <div class="space-y-3 bg-stone-900/60 p-4 rounded-2xl border border-amber-900/30">
+                                    <p class="font-bold text-sm text-amber-100"><b>Q${idx+1}.</b> ${q.question}</p>
+                                    <div class="space-y-2 text-xs">
+                                        ${q.options.map((opt, oIdx) => `
+                                            <label class="block p-3 bg-stone-900 border border-amber-900/30 rounded-xl cursor-pointer hover:border-amber-500 transition-colors">
+                                                <input type="radio" name="q_${idx}" value="${oIdx}" required class="mr-2"> ${opt}
+                                            </label>
+                                        `).join('')}
+                                    </div>
+                                </div>
+                            `).join('')}
+                            <button type="submit" class="w-full py-3 ${window.currentBtnClass} text-sm">Valider mes réponses</button>
+                        </form>
+                    </div>`;
+            }
+
+            return `
+                <div class="max-w-4xl mx-auto space-y-6">
+                    <div class="${window.currentCardClass} p-6 space-y-4">
+                        <h2 class="text-2xl font-black text-amber-400"><i class="fa-solid fa-brain mr-2"></i>Quiz & Suivi des Progrès</h2>
+                        <p class="text-xs text-amber-200/70">Teste tes connaissances autant de fois que tu veux et suis ta progression.</p>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div class="${window.currentCardClass} p-6 space-y-4">
+                            <h3 class="font-bold text-sm text-amber-300 uppercase">🧠 Quiz Disponibles</h3>
+                            <div class="space-y-3">
+                                ${quizzes.length > 0 ? quizzes.map(q => `
+                                    <div class="p-4 bg-stone-900 border border-amber-900/40 rounded-2xl flex justify-between items-center text-xs">
+                                        <div>
+                                            <h4 class="font-bold text-amber-100">${q.title}</h4>
+                                            <p class="text-[10px] text-amber-200/50">${q.questions.length} question(s)</p>
+                                        </div>
+                                        <button onclick="state.activeQuizId=${q.id};render()" class="px-4 py-2 ${window.currentBtnClass}">Faire le test</button>
+                                    </div>
+                                `).join('') : '<p class="text-xs text-amber-200/40 italic">Aucun quiz disponible pour le moment.</p>'}
+                            </div>
+                        </div>
+
+                        <div class="${window.currentCardClass} p-6 space-y-4">
+                            <h3 class="font-bold text-sm text-amber-300 uppercase">📈 Mon Historique</h3>
+                            <div class="space-y-2 max-h-64 overflow-y-auto">
+                                ${userSubmissions.length > 0 ? userSubmissions.map(s => `
+                                    <div class="p-3 bg-stone-900 rounded-xl text-xs flex justify-between items-center">
+                                        <div>
+                                            <p class="font-bold text-amber-100">${s.quizTitle}</p>
+                                            <p class="text-[10px] text-amber-200/50">${s.date}</p>
+                                        </div>
+                                        <span class="px-3 py-1 bg-amber-500/20 text-amber-300 rounded-lg font-bold">${s.score} / ${s.total}</span>
+                                    </div>
+                                `).join('') : '<p class="text-xs text-amber-200/40 italic">Aucun test réalisé pour l\'instant.</p>'}
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+        }
+
+        async function submitQuiz(e, quizId) {
+            e.preventDefault();
+            let quizzes = await DB.get('quizzes', []);
+            let quiz = quizzes.find(q => q.id == quizId);
+            if(!quiz) return;
+
+            let score = 0;
+            quiz.questions.forEach((q, idx) => {
+                let selected = document.querySelector(`input[name="q_${idx}"]:checked`);
+                if(selected && parseInt(selected.value) === q.correct) {
+                    score++;
+                }
+            });
+
+            let user = getCurrentUser();
+            let submission = { username: user.username, quizTitle: quiz.title, score, total: quiz.questions.length, date: new Date().toLocaleDateString() + ' à ' + new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) };
+
+            let submissions = await DB.get('quiz_submissions', []);
+            submissions.push(submission);
+            await DB.set('quiz_submissions', submissions);
+
+            alert(`Quiz terminé ! Ton score est de ${score} / ${quiz.questions.length}`);
+            state.activeQuizId = null;
+            render();
+        }
+
+        async function renderOrientation(user) {
+            let links = await DB.get('orientation_links', []);
+            return `
+                <div class="max-w-4xl mx-auto space-y-6">
+                    <div class="${window.currentCardClass} p-6 space-y-4">
+                        <h2 class="text-2xl font-black text-amber-400"><i class="fa-solid fa-compass mr-2"></i>Espace Orientation</h2>
+                        <p class="text-xs text-amber-200/70">Découvre les liens et ressources utiles pour ton orientation post-bac.</p>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        ${links.length > 0 ? links.map(l => `
+                            <div class="${window.currentCardClass} p-5 space-y-3">
+                                <h3 class="font-bold text-amber-300 text-sm">${l.title}</h3>
+                                <a href="${l.url}" target="_blank" class="px-4 py-2 bg-stone-900 border border-amber-900/40 rounded-xl text-xs text-amber-200 inline-block hover:border-amber-500">
+                                    <i class="fa-solid fa-external-link mr-1"></i> Ouvrir le site
+                                </a>
+                            </div>
+                        `).join('') : '<div class="col-span-2 text-center py-10 text-xs text-amber-200/40 italic">Aucun lien d\'orientation publié.</div>'}
+                    </div>
+                </div>`;
+        }
+
+        function renderDocPage(title, items, user) {
+            return `
+                <div class="max-w-4xl mx-auto space-y-6">
+                    <div class="${window.currentCardClass} p-6 space-y-2">
+                        <h2 class="text-2xl font-black text-amber-400">${title}</h2>
+                        <p class="text-xs text-amber-200/70">Consulte et télécharge les documents publiés.</p>
+                    </div>
+                    <div class="space-y-3">
+                        ${items.length > 0 ? items.map(doc => `
+                            <div class="${window.currentCardClass} p-4 flex justify-between items-center text-xs">
+                                <div><h4 class="font-bold text-amber-100">${doc.title}</h4><p class="text-[10px] text-amber-200/50">${doc.desc || ''}</p></div>
+                                <a href="${doc.url}" target="_blank" class="px-4 py-2 bg-stone-900 border border-amber-900/40 rounded-xl font-bold text-amber-300">Consulter</a>
+                            </div>
+                        `).join('') : '<div class="text-center py-12 text-xs text-amber-200/40 italic">Aucun document disponible.</div>'}
+                    </div>
+                </div>`;
+        }
+
+        function renderGeminiTab() {
+            return `
+                <div class="max-w-4xl mx-auto space-y-6">
+                    <div class="${window.currentCardClass} p-8 space-y-4 text-center">
+                        <i class="fa-solid fa-sparkles text-5xl text-sky-400 animate-pulse"></i>
+                        <h2 class="text-2xl font-black text-white">Assistant Gemini AI (Réservé Admin)</h2>
+                        <p class="text-xs text-amber-200/70">Utilise Gemini directement dans un onglet dédié ou accède à la plateforme officielle.</p>
+                        <div class="pt-2">
+                            <button onclick="window.open('https://gemini.google.com/', '_blank')" class="px-6 py-3 bg-sky-600 hover:bg-sky-500 text-white rounded-2xl font-bold text-sm shadow-xl inline-flex items-center gap-2">
+                                <i class="fa-solid fa-external-link"></i> Ouvrir Google Gemini
+                            </button>
+                        </div>
+                    </div>
+                </div>`;
+        }
+
+        async function renderAdmin(user) {
+            let appreciations = await DB.get('appreciations', {});
+            let users = await DB.get('users', []);
+            let customPages = await DB.get('custom_pages', []);
+            let hiddenPages = await DB.get('hidden_pages', []);
+
+            return `
+                <div class="max-w-5xl mx-auto space-y-6">
+                    <div class="${window.currentCardClass} p-6">
+                        <h2 class="text-2xl font-black text-amber-400 mb-4"><i class="fa-solid fa-user-gear mr-2"></i>Panneau Administration</h2>
+                        <div class="flex gap-2 border-b border-amber-900/40 pb-3 flex-wrap text-xs">
+                            <button onclick="state.adminSub='users';render()" class="px-4 py-2 rounded-xl font-bold ${state.adminSub === 'users' ? 'bg-amber-500 text-black' : 'bg-stone-900 text-amber-200'}">Gestion des Élèves</button>
+                            <button onclick="state.adminSub='appreciations';render()" class="px-4 py-2 rounded-xl font-bold ${state.adminSub === 'appreciations' ? 'bg-amber-500 text-black' : 'bg-stone-900 text-amber-200'}">Appréciations Trimestrielles</button>
+                            <button onclick="state.adminSub='pages';render()" class="px-4 py-2 rounded-xl font-bold ${state.adminSub === 'pages' ? 'bg-amber-500 text-black' : 'bg-stone-900 text-amber-200'}">Créateur & Gestion des Pages</button>
+                            <button onclick="state.adminSub='themes';render()" class="px-4 py-2 rounded-xl font-bold ${state.adminSub === 'themes' ? 'bg-amber-500 text-black' : 'bg-stone-900 text-amber-200'}">Thèmes & Fond d'écran</button>
+                        </div>
+                    </div>
+
+                    ${state.adminSub === 'users' ? renderAdminUsers(users) : ''}
+                    ${state.adminSub === 'appreciations' ? renderAdminAppreciations(users, appreciations) : ''}
+                    ${state.adminSub === 'pages' ? renderAdminPages(customPages, hiddenPages) : ''}
+                    ${state.adminSub === 'themes' ? renderAdminThemes() : ''}
+                </div>`;
+        }
+
+        function renderAdminUsers(users) {
+            let students = users.filter(u => u.role !== 'admin');
+            return `
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div class="${window.currentCardClass} p-6 space-y-4">
+                        <h3 class="font-bold text-amber-300 text-sm">Ajouter un nouvel Élève</h3>
+                        <form onsubmit="createStudentAccount(event)" class="space-y-3">
+                            <div>
+                                <label class="block text-[10px] uppercase font-bold text-amber-200/60 mb-1">Identifiant élève</label>
+                                <input type="text" id="nu-user" required placeholder="ex: dupont_m" class="w-full p-2.5 bg-stone-900 border border-amber-900/40 rounded-xl text-xs text-amber-100">
+                            </div>
+                            <div>
+                                <label class="block text-[10px] uppercase font-bold text-amber-200/60 mb-1">Mot de passe temporaire</label>
+                                <input type="password" id="nu-pass" required placeholder="Mot de passe..." class="w-full p-2.5 bg-stone-900 border border-amber-900/40 rounded-xl text-xs text-amber-100">
+                            </div>
+                            <button type="submit" class="w-full py-2.5 ${window.currentBtnClass} text-xs">Créer le compte</button>
+                        </form>
+                    </div>
+
+                    <div class="md:col-span-2 ${window.currentCardClass} p-6 space-y-4">
+                        <h3 class="font-bold text-amber-300 text-sm">Comptes Élèves Enregistrés (${students.length})</h3>
+                        <div class="space-y-2 max-h-96 overflow-y-auto">
+                            ${students.length > 0 ? students.map(s => `
+                                <div class="p-3 bg-stone-900 border border-amber-900/30 rounded-xl flex items-center justify-between text-xs">
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-lg">${s.avatar || '🏰'}</span>
+                                        <div>
+                                            <p class="font-bold text-amber-100">${s.username}</p>
+                                            <p class="text-[10px] ${s.status === 'masked' ? 'text-red-400 font-bold' : 'text-emerald-400'}">${s.status === 'masked' ? 'Compte masqué / désactivé' : 'Actif'}</p>
+                                        </div>
+                                    </div>
+                                    <div class="flex gap-2 flex-wrap">
+                                        <button onclick="toggleUserStatus('${s.username}')" class="px-3 py-1 rounded-lg text-xs font-bold ${s.status === 'masked' ? 'bg-emerald-600/30 text-emerald-300 border border-emerald-500/40' : 'bg-amber-600/30 text-amber-300 border border-amber-500/40'}">
+                                            ${s.status === 'masked' ? 'Activer' : 'Masquer'}
+                                        </button>
+                                        <button onclick="resetUserPassword('${s.username}')" class="px-3 py-1 bg-stone-950 border border-amber-900/40 text-amber-200 rounded-lg text-xs font-bold">Réinit. Pass</button>
+                                        <button onclick="deleteStudentAccount('${s.username}')" class="px-3 py-1 bg-red-600/30 text-red-300 border border-red-500/40 rounded-lg text-xs font-bold">Supprimer</button>
+                                    </div>
+                                </div>
+                            `).join('') : '<p class="text-xs text-amber-200/40 italic">Aucun élève inscrit.</p>'}
+                        </div>
+                    </div>
+                </div>`;
+        }
+
+        async function createStudentAccount(e) {
+            e.preventDefault();
+            let username = document.getElementById('nu-user').value.trim();
+            let password = document.getElementById('nu-pass').value.trim();
+
+            let users = await DB.get('users', []);
+            if (users.some(u => u.username === username)) return alert("Cet identifiant existe déjà.");
+
+            users.push({
+                username,
+                password,
+                role: 'student',
+                status: 'active',
+                avatar: '🎓',
+                mustChangePass: true,
+                birthday: ''
+            });
+
+            await DB.set('users', users);
+            showToast("Succès", `Compte élève pour ${username} créé !`);
+            render();
+        }
+
+        async function toggleUserStatus(username) {
+            let users = await DB.get('users', []);
+            let idx = users.findIndex(u => u.username === username);
+            if(idx !== -1) {
+                users[idx].status = users[idx].status === 'masked' ? 'active' : 'masked';
+                await DB.set('users', users);
+                render();
+            }
+        }
+
+        async function deleteStudentAccount(username) {
+            if(!confirm(`Êtes-vous sûr de vouloir supprimer définitivement le compte de ${username} ?`)) return;
+            let users = await DB.get('users', []);
+            users = users.filter(u => u.username !== username);
+            await DB.set('users', users);
+            showToast("Supprimé", `Le compte de ${username} a été supprimé.`);
+            render();
+        }
+
+        async function resetUserPassword(username) {
+            let nPass = prompt(`Entrez le nouveau mot de passe temporaire pour ${username} :`);
+            if(!nPass) return;
+            let users = await DB.get('users', []);
+            let idx = users.findIndex(u => u.username === username);
+            if(idx !== -1) {
+                users[idx].password = nPass;
+                users[idx].mustChangePass = true;
+                await DB.set('users', users);
+                alert(`Mot de passe de ${username} réinitialisé.`);
+                render();
+            }
+        }
+
+        function renderAdminAppreciations(users, appreciations) {
+            let students = users.filter(u => u.role !== 'admin');
+            return `
+                <div class="${window.currentCardClass} p-6 space-y-4">
+                    <div class="flex justify-between items-center">
+                        <h3 class="font-bold text-amber-300 text-sm">Gestion des Appréciations Trimestrielles</h3>
+                        <p class="text-[10px] text-amber-200/50">Tape tes appréciations et valide pour publier la fiche de chaque élève.</p>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-xs text-amber-100 border-collapse">
+                            <thead>
+                                <tr class="border-b border-amber-900/40 text-amber-400">
+                                    <th class="p-3">Élève</th>
+                                    <th class="p-3">Trimestre 1</th>
+                                    <th class="p-3">Trimestre 2</th>
+                                    <th class="p-3">Trimestre 3</th>
+                                    <th class="p-3 text-center">Publier</th>
+                                    <th class="p-3 text-right">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${students.map(s => {
+                                    let app = appreciations[s.username] || { t1: '', t2: '', t3: '', published: false };
+                                    return `
+                                        <tr class="border-b border-amber-900/20 bg-stone-900/40">
+                                            <td class="p-3 font-bold text-amber-300">${s.username}</td>
+                                            <td class="p-2"><textarea id="app_t1_${s.username}" class="w-full p-2 bg-stone-900 border border-amber-900/40 rounded-xl text-xs">${app.t1||''}</textarea></td>
+                                            <td class="p-2"><textarea id="app_t2_${s.username}" class="w-full p-2 bg-stone-900 border border-amber-900/40 rounded-xl text-xs">${app.t2||''}</textarea></td>
+                                            <td class="p-2"><textarea id="app_t3_${s.username}" class="w-full p-2 bg-stone-900 border border-amber-900/40 rounded-xl text-xs">${app.t3||''}</textarea></td>
+                                            <td class="p-3 text-center">
+                                                <input type="checkbox" id="app_pub_${s.username}" ${app.published ? 'checked' : ''} class="w-4 h-4 text-amber-600 rounded">
+                                            </td>
+                                            <td class="p-3 text-right">
+                                                <button onclick="saveStudentAppreciation('${s.username}')" class="px-3 py-1.5 bg-emerald-600 text-white rounded-xl font-bold text-xs">Enregistrer</button>
+                                            </td>
+                                        </tr>`;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>`;
+        }
+
+        async function saveStudentAppreciation(username) {
+            let appreciations = await DB.get('appreciations', {});
+            appreciations[username] = {
+                t1: document.getElementById(`app_t1_${username}`).value,
+                t2: document.getElementById(`app_t2_${username}`).value,
+                t3: document.getElementById(`app_t3_${username}`).value,
+                published: document.getElementById(`app_pub_${username}`).checked
+            };
+            await DB.set('appreciations', appreciations);
+            showToast("Enregistré", `Appréciations de ${username} enregistrées !`);
+        }
+
+        function renderAdminPages(customPages, hiddenPages) {
+            const defaultPages = [
+                { id: 'home', title: 'Accueil & QR Code' },
+                { id: 'appreciations', title: 'Mes Appréciations' },
+                { id: 'avatar', title: 'Mon Avatar' },
+                { id: 'chat', title: 'Messagerie' },
+                { id: 'calendar', title: 'Calendrier' },
+                { id: 'quizzes', title: 'Quiz & Progrès' },
+                { id: 'orientation', title: 'Orientation' },
+                { id: 'revisions', title: 'Fiches de Révision' },
+                { id: 'exams', title: 'Sujets Bac' },
+                { id: 'notes', title: 'Bloc-Notes' }
+            ];
+
+            return `
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="${window.currentCardClass} p-6 space-y-4">
+                        <h3 class="font-bold text-amber-300 text-sm">Créer une nouvelle page sur-mesure</h3>
+                        <form onsubmit="createNewPage(event)" class="space-y-3">
+                            <input type="text" id="newpage-title" required placeholder="Titre de la page..." class="w-full p-3 bg-stone-900 border border-amber-900/40 rounded-xl text-xs text-amber-100">
+                            <input type="text" id="newpage-icon" placeholder="Icône FontAwesome (ex: book, star, trophy)..." class="w-full p-3 bg-stone-900 border border-amber-900/40 rounded-xl text-xs text-amber-100">
+                            <textarea id="newpage-content" required placeholder="Contenu HTML ou Texte..." class="w-full h-32 p-3 bg-stone-900 border border-amber-900/40 rounded-xl text-xs text-amber-100"></textarea>
+                            <button type="submit" class="w-full py-2.5 ${window.currentBtnClass} text-xs">Publier la page</button>
+                        </form>
+                    </div>
+
+                    <div class="${window.currentCardClass} p-6 space-y-4">
+                        <h3 class="font-bold text-amber-300 text-sm">Masquer / Afficher les pages</h3>
+                        <div class="space-y-2 max-h-80 overflow-y-auto">
+                            ${defaultPages.map(p => `
+                                <div class="p-3 bg-stone-900 rounded-xl flex justify-between items-center text-xs">
+                                    <span>${p.title} <span class="text-[10px] text-amber-200/50">(Système)</span></span>
+                                    <button onclick="toggleHidePage('${p.id}')" class="px-3 py-1 rounded-lg font-bold text-xs ${hiddenPages.includes(p.id) ? 'bg-red-600/30 text-red-300 border border-red-500/40' : 'bg-emerald-600/30 text-emerald-300 border border-emerald-500/40'}">
+                                        ${hiddenPages.includes(p.id) ? 'Masquée' : 'Visible'}
+                                    </button>
+                                </div>`).join('')}
+                            ${customPages.map(p => `
+                                <div class="p-3 bg-stone-900 rounded-xl flex justify-between items-center text-xs">
+                                    <span>${p.title}</span>
+                                    <button onclick="toggleHidePage('page_${p.id}')" class="px-3 py-1 rounded-lg font-bold text-xs ${hiddenPages.includes('page_' + p.id) ? 'bg-red-600/30 text-red-300 border border-red-500/40' : 'bg-emerald-600/30 text-emerald-300 border border-emerald-500/40'}">
+                                        ${hiddenPages.includes('page_' + p.id) ? 'Masquée' : 'Visible'}
+                                    </button>
+                                </div>`).join('')}
+                        </div>
+                    </div>
+                </div>`;
+        }
+
+        async function createNewPage(e) {
+            e.preventDefault();
+            let title = document.getElementById('newpage-title').value;
+            let icon = document.getElementById('newpage-icon').value || 'file-lines';
+            let content = document.getElementById('newpage-content').value;
+
+            let customPages = await DB.get('custom_pages', []);
+            customPages.push({ id: Date.now(), title, icon, content });
+            await DB.set('custom_pages', customPages);
+            showToast("Succès", "Nouvelle page créée et intégrée au menu !");
+            render();
+        }
+
+        async function toggleHidePage(pageId) {
+            let hiddenPages = await DB.get('hidden_pages', []);
+            if (hiddenPages.includes(pageId)) {
+                hiddenPages = hiddenPages.filter(id => id !== pageId);
+            } else {
+                hiddenPages.push(pageId);
+            }
+            await DB.set('hidden_pages', hiddenPages);
+            render();
+        }
+
+        function renderAdminThemes() {
+            return `
+                <div class="${window.currentCardClass} p-6 space-y-4 text-center">
+                    <h3 class="font-bold text-amber-300 text-sm">Gestion des Thèmes & Canva</h3>
+                    <p class="text-xs text-amber-200/70">Ouvre Canva pour créer ton fond d'écran sur mesure, puis colle l'URL de l'image pour l'appliquer à l'application.</p>
+                    <div class="flex justify-center gap-3 pt-2">
+                        <button onclick="toggleModal('theme-canvas-modal', true)" class="px-5 py-3 ${window.currentBtnClass} text-xs">
+                            <i class="fa-solid fa-paintbrush mr-2"></i> Créer / Appliquer un fond Canva
+                        </button>
+                    </div>
+                </div>`;
+        }
+
+        async function saveCanvasTheme() {
+            let name = document.getElementById('canvas-theme-name').value;
+            let bgUrl = document.getElementById('canvas-theme-bg').value;
+            if(!name || !bgUrl) return alert("Veuillez remplir le nom et l'URL de l'image.");
+
+            let customThemes = await DB.get('custom_themes', []);
+            let themeId = 'custom_' + Date.now();
+            customThemes.push({ id: themeId, name, bgUrl });
+            await DB.set('custom_themes', customThemes);
+            await DB.set('theme', themeId);
+
+            toggleModal('theme-canvas-modal', false);
+            applyTheme(themeId);
+            showToast("Thème Appliqué", "Ton fond Canva personnalisé est configuré !");
+        }
+
+        async function handleLogin(e) {
+            e.preventDefault();
+            let u = document.getElementById('l-user').value.trim();
+            let p = document.getElementById('l-pass').value.trim();
+
+            let users = await DB.get('users', []);
+            let user = users.find(x => x.username === u && x.password === p);
+
+            if (user) {
+                localStorage.setItem('leqg_current_user', JSON.stringify(user));
+                render();
+            } else {
+                alert("Identifiant ou mot de passe incorrect");
+            }
+        }
+
+        async function saveSetup(e) {
+            e.preventDefault();
+            let pass = document.getElementById('s-pass').value;
+            let bday = document.getElementById('s-bday').value;
+
+            let user = getCurrentUser();
+            let users = await DB.get('users', []);
+            let idx = users.findIndex(u => u.username === user.username);
+
+            if (idx !== -1) {
+                users[idx].password = pass;
+                users[idx].birthday = bday;
+                users[idx].mustChangePass = false;
+                await DB.set('users', users);
+                localStorage.setItem('leqg_current_user', JSON.stringify(users[idx]));
+                render();
+            }
+        }
+
+        async function updateAvatar(icon) {
+            let user = getCurrentUser();
+            let users = await DB.get('users', []);
+            let idx = users.findIndex(u => u.username === user.username);
+            if(idx !== -1) {
+                users[idx].avatar = icon;
+                await DB.set('users', users);
+                localStorage.setItem('leqg_current_user', JSON.stringify(users[idx]));
+                render();
+            }
+        }
+
+        function logout() {
+            localStorage.removeItem('leqg_current_user');
+            render();
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>
